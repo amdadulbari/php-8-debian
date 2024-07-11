@@ -3,7 +3,7 @@ name: Docker
 on:
   push:
     branches:
-      - main
+      - '**'
 
 jobs:
   push:
@@ -11,7 +11,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        image-variant: [ 'apache', 'cli', 'fpm', 'supervisor', 'dev', 'oci', 'supervisor-oci' ]
+        image-variant: ['apache', 'cli', 'fpm', 'supervisor', 'dev', 'oci', 'supervisor-oci']
+    env:
+      PHP_SHORT_VERSION: 8.3
+      PHP_VERSION: 8.3.8
+      IMAGE_NAME: ${{ secrets.DOCKER_REGISTRY_URL }}/${{ secrets.DOCKER_USERNAME }}/${{ secrets.IMAGE_NAME }}
     steps:
       - uses: actions/checkout@v3
         with:
@@ -20,27 +24,26 @@ jobs:
       - name: Log into registry
         run: echo "${{ secrets.DOCKER_PASSWORD }}" | docker login ${{ secrets.DOCKER_REGISTRY_URL }} -u ${{ secrets.DOCKER_USERNAME }} --password-stdin
 
-      - name: Build and push the images
+      - name: Build Docker Image
         run: |
           VERSION=${{ matrix.image-variant }}
-          PHP_SHORT_VERSION=8.3
-          PHP_VERSION=8.3.8
-
           tmpName="image-$RANDOM"
-          docker build $VERSION --file $VERSION/Dockerfile --tag $tmpName --build-arg PHP_VERSION=$PHP_VERSION
+          docker build $VERSION --file $VERSION/Dockerfile --tag $tmpName --build-arg PHP_VERSION=${{ env.PHP_VERSION }}
           if [ $? -ne 0 ]; then 
-          echo "Docker build failed, for ${VERSION}-$PHP_VERSION"
+            echo "Docker build failed for ${VERSION}-${{ env.PHP_VERSION }}"
             exit 1
           fi
-          IMAGE_ID=${{ secrets.DOCKER_REGISTRY_URL }}/${{ secrets.DOCKER_USERNAME }}/${{ secrets.IMAGE_NAME }}
-
-          docker tag $tmpName $IMAGE_ID:$VERSION
-          docker push $IMAGE_ID:$VERSION
-          docker tag $tmpName $IMAGE_ID:${VERSION}-$PHP_VERSION
-          docker push $IMAGE_ID:${VERSION}-$PHP_VERSION
-          docker tag $tmpName $IMAGE_ID:${VERSION}-$PHP_SHORT_VERSION
-          docker push $IMAGE_ID:${VERSION}-$PHP_SHORT_VERSION
+          echo "tmpName=$tmpName" >> $GITHUB_ENV
+          
+      - name: Tag and Push Docker Images
+        run: |
+          VERSION=${{ matrix.image-variant }}
+          tmpName=$(echo $tmpName)
+          TAGS=("$VERSION" "${VERSION}-${{ env.PHP_VERSION }}" "${VERSION}-${{ env.PHP_SHORT_VERSION }}")
           if [ "$VERSION" == "fpm" ]; then 
-            docker tag $tmpName $IMAGE_ID:latest
-            docker push $IMAGE_ID:latest
+            TAGS+=("latest")
           fi
+          for tag in "${TAGS[@]}"; do
+            docker tag $tmpName ${{ env.IMAGE_NAME }}:$tag
+            docker push ${{ env.IMAGE_NAME }}:$tag
+          done
