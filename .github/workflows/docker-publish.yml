@@ -31,8 +31,17 @@ jobs:
           IMAGE_ID=${{ secrets.DOCKER_REGISTRY_URL }}/${{ secrets.DOCKER_USERNAME }}/${{ secrets.IMAGE_NAME }}
           PLATFORMS="linux/amd64, linux/arm64"
 
-          docker buildx build --platform $PLATFORMS --file $VERSION/Dockerfile --tag $IMAGE_ID:$VERSION --tag $IMAGE_ID:${VERSION}-$PHP_VERSION --tag $IMAGE_ID:${VERSION}-$PHP_SHORT_VERSION --push .
+          # Corrected buildx build command with context specified
+          docker buildx build --platform $PLATFORMS --file $VERSION/Dockerfile \
+            --tag $IMAGE_ID:$VERSION \
+            --tag $IMAGE_ID:${VERSION}-$PHP_VERSION \
+            --tag $IMAGE_ID:${VERSION}-$PHP_SHORT_VERSION \
+            --push \
+            $VERSION  # Context for the build is the directory named as the variant
 
-          if [ "$VERSION" == "fpm" ]; then 
-            docker buildx build --platform $PLATFORMS --file $VERSION/Dockerfile --tag $IMAGE_ID:latest --push .
-          fi
+          # Conditionally push the 'latest' tag for the 'fpm' variant
+          if [ "$VERSION" == "fpm" ]; then
+            docker buildx build --platform $PLATFORMS --file $VERSION/Dockerfile \
+              --tag $IMAGE_ID:latest \
+              --push \
+              $VERSION  # Context for the build is the directory named as the variant
