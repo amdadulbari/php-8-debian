@@ -12,13 +12,14 @@ jobs:
       fail-fast: false
       matrix:
         image-variant: [ 'apache', 'cli', 'fpm', 'supervisor', 'dev', 'oci', 'supervisor-oci' ]
+        architecture: [ 'linux/amd64', 'linux/arm64' ]
     steps:
       - uses: actions/checkout@v3
         with:
           fetch-depth: 0
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v1
+        uses: docker/setup-buildx-action@v2
 
       - name: Log into registry
         run: echo "${{ secrets.DOCKER_PASSWORD }}" | docker login ${{ secrets.DOCKER_REGISTRY_URL }} -u ${{ secrets.DOCKER_USERNAME }} --password-stdin
@@ -26,22 +27,16 @@ jobs:
       - name: Build and push the images
         run: |
           VERSION=${{ matrix.image-variant }}
+          ARCHITECTURE=${{ matrix.architecture }}
           PHP_SHORT_VERSION=8.3
           PHP_VERSION=8.3.8
+
           IMAGE_ID=${{ secrets.DOCKER_REGISTRY_URL }}/${{ secrets.DOCKER_USERNAME }}/${{ secrets.IMAGE_NAME }}
-          PLATFORMS="linux/amd64, linux/arm64"
 
-          # Corrected buildx build command with context specified
-          docker buildx build --platform $PLATFORMS --file $VERSION/Dockerfile \
-            --tag $IMAGE_ID:$VERSION \
-            --tag $IMAGE_ID:${VERSION}-$PHP_VERSION \
-            --tag $IMAGE_ID:${VERSION}-$PHP_SHORT_VERSION \
-            --push \
-            $VERSION  # Context for the build is the directory named as the variant
+          docker buildx build --platform $ARCHITECTURE -f $VERSION/Dockerfile --tag $IMAGE_ID:$VERSION --build-arg PHP_VERSION=$PHP_VERSION --push .
+          docker buildx build --platform $ARCHITECTURE -f $VERSION/Dockerfile --tag $IMAGE_ID:${VERSION}-$PHP_VERSION --build-arg PHP_VERSION=$PHP_VERSION --push .
+          docker buildx build --platform $ARCHITECTURE -f $VERSION/Dockerfile --tag $IMAGE_ID:${VERSION}-$PHP_SHORT_VERSION --build-arg PHP_VERSION=$PHP_VERSION --push .
 
-          # Conditionally push the 'latest' tag for the 'fpm' variant
-          if [ "$VERSION" == "fpm" ]; then
-            docker buildx build --platform $PLATFORMS --file $VERSION/Dockerfile \
-              --tag $IMAGE_ID:latest \
-              --push \
-              $VERSION  # Context for the build is the directory named as the variant
+          if [ "$VERSION" == "fpm" ]; then 
+            docker buildx build --platform $ARCHITECTURE -f $VERSION/Dockerfile --tag $IMAGE_ID:latest --build-arg PHP_VERSION=$PHP_VERSION --push .
+          fi
