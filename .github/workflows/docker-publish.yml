@@ -29,7 +29,7 @@ jobs:
           VERSION=${{ matrix.image-variant }}
           ARCHITECTURE=${{ matrix.architecture }}
           PHP_SHORT_VERSION=8.3
-          PHP_VERSION=8.3.8
+          PHP_VERSION=8.3.10
 
           IMAGE_ID=${{ secrets.DOCKER_REGISTRY_URL }}/${{ secrets.DOCKER_USERNAME }}/${{ secrets.IMAGE_NAME }}
 
