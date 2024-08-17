@@ -33,7 +33,7 @@ jobs:
 
           IMAGE_ID=${{ secrets.DOCKER_REGISTRY_URL }}/${{ secrets.DOCKER_USERNAME }}/${{ secrets.IMAGE_NAME }}
 
-          if [ "$VERSION" != "oci" && "$ARCHITECTURE"!='linux/arm64' ]; then 
+          if [ "$VERSION" != "oci" ] && [ "$ARCHITECTURE" != "linux/arm64" ]; then 
             docker buildx build --platform $ARCHITECTURE -f $VERSION/Dockerfile --tag $IMAGE_ID:$VERSION --build-arg PHP_VERSION=$PHP_VERSION --push .
             docker buildx build --platform $ARCHITECTURE -f $VERSION/Dockerfile --tag $IMAGE_ID:${VERSION}-$PHP_VERSION --build-arg PHP_VERSION=$PHP_VERSION --push .
             docker buildx build --platform $ARCHITECTURE -f $VERSION/Dockerfile --tag $IMAGE_ID:${VERSION}-$PHP_SHORT_VERSION --build-arg PHP_VERSION=$PHP_VERSION --push .
