@@ -24,12 +24,17 @@ All image contain following php extension and [composer](https://github.com/comp
 - curl
 - exif
 - iconv
+- xsl
+- soap
+- pgsql
+- igbinary
+- mongodb
 - xdebug(Only in cli and dev variant)
 
 ## Image Variants
 
 ### php-8-debian:cli or php-8-debian:cli-{php-version}
-This use the cli base image with xdebug enabled, also contain nodejs-20.x and npm
+This use the cli base image with xdebug enabled, also contain nodejs-24.x and npm
 
 ### php-8-debian:fpm or php-8-debian:fpm-{php-version}
 This use the fpm base image
@@ -46,5 +51,5 @@ This use the cli base image and set supervisor as entry point. Mount any supervi
 ### php-8-debian:franken or php-8-debian:franken-{php-version}
 This use the dunglas/frankenphp base image
 
-### php-8-debian:franken or php-8-debian:supervisor-franken-{php-version}
+### php-8-debian:supervisor-franken or php-8-debian:supervisor-franken-{php-version}
 This use the dunglas/frankenphp base image with github.com/baldinof/caddy-supervisor module
