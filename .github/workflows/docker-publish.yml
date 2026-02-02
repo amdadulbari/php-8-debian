@@ -13,7 +13,7 @@ jobs:
       matrix:
         image-variant: [ 'franken', 'apache', 'cli', 'fpm', 'supervisor', 'dev', 'supervisor-franken' ]
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 

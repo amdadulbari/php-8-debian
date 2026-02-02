@@ -13,7 +13,7 @@ RUN set -eux; \
         libyaml-dev \
         gettext graphviz \
         libmagickwand-dev \
-        librabbitmq-dev\
+        librabbitmq-dev \
         libpq-dev  \
         libxslt1-dev \
         \
