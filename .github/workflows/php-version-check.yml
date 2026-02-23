@@ -5,6 +5,13 @@ on:
     - cron: '0 6 * * *' # Daily at 6 AM UTC
   workflow_dispatch: # Manual trigger
 
+# ---------------------------------------------------------------
+# Change this to track a different PHP minor line (e.g., 8.6)
+# All Dockerfiles and builds will follow this version.
+# ---------------------------------------------------------------
+env:
+  PHP_MINOR: '8.5'
+
 permissions:
   contents: write
 
@@ -12,93 +19,27 @@ jobs:
   check-and-update:
     runs-on: ubuntu-latest
     outputs:
-      main-updated: ${{ steps.update.outputs.main-updated }}
-      oci-updated: ${{ steps.update.outputs.oci-updated }}
-      new-main-version: ${{ steps.update.outputs.new-main-version }}
-      new-main-short: ${{ steps.update.outputs.new-main-short }}
-      new-oci-version: ${{ steps.update.outputs.new-oci-version }}
+      updated: ${{ steps.update.outputs.updated }}
+      new-version: ${{ steps.update.outputs.new-version }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Get current versions from repo
+      - name: Get current PHP version from repo
         id: current
         run: |
-          # Main track version from docker-publish.yml
-          CURRENT_MAIN=$(grep -oP 'PHP_VERSION=\K[0-9]+\.[0-9]+\.[0-9]+' .github/workflows/docker-publish.yml | head -1)
-          CURRENT_MAIN_SHORT=$(echo "$CURRENT_MAIN" | grep -oP '^\d+\.\d+')
+          CURRENT=$(grep -oP 'PHP_VERSION=\K[0-9]+\.[0-9]+\.[0-9]+' .github/workflows/docker-publish.yml | head -1)
+          echo "version=$CURRENT" >> "$GITHUB_OUTPUT"
+          echo "Current PHP version: $CURRENT"
 
-          # OCI track version from oci/Dockerfile
-          CURRENT_OCI=$(grep -oP 'ARG PHP_VERSION=\K[0-9]+\.[0-9]+\.[0-9]+' oci/Dockerfile)
-          CURRENT_OCI_SHORT=$(echo "$CURRENT_OCI" | grep -oP '^\d+\.\d+')
-
-          echo "main=$CURRENT_MAIN" >> "$GITHUB_OUTPUT"
-          echo "main-short=$CURRENT_MAIN_SHORT" >> "$GITHUB_OUTPUT"
-          echo "oci=$CURRENT_OCI" >> "$GITHUB_OUTPUT"
-          echo "oci-short=$CURRENT_OCI_SHORT" >> "$GITHUB_OUTPUT"
-
-          echo "Current main track: $CURRENT_MAIN (${CURRENT_MAIN_SHORT}.x)"
-          echo "Current OCI track:  $CURRENT_OCI (${CURRENT_OCI_SHORT}.x)"
-
-      - name: Fetch all PHP versions from Docker Hub
+      - name: Check latest PHP ${{ env.PHP_MINOR }}.x on Docker Hub
         id: fetch
         run: |
-          # Fetch all fpm-bookworm tags (paginated) to discover versions
-          ALL_VERSIONS=""
-          PAGE=1
-          while true; do
-            RESPONSE=$(curl -s "https://hub.docker.com/v2/repositories/library/php/tags/?page_size=100&page=${PAGE}&name=fpm-bookworm")
-            TAGS=$(echo "$RESPONSE" | jq -r '.results[]?.name // empty')
-            if [ -z "$TAGS" ]; then
-              break
-            fi
-            ALL_VERSIONS="${ALL_VERSIONS}${TAGS}"$'\n'
-            NEXT=$(echo "$RESPONSE" | jq -r '.next // empty')
-            if [ -z "$NEXT" ]; then
-              break
-            fi
-            PAGE=$((PAGE + 1))
-          done
+          echo "Fetching tags for PHP ${{ env.PHP_MINOR }}.x from Docker Hub..."
 
-          # Extract X.Y.Z versions from tags matching X.Y.Z-fpm-bookworm
-          PHP_VERSIONS=$(echo "$ALL_VERSIONS" | grep -oP '^\d+\.\d+\.\d+(?=-fpm-bookworm$)' | sort -t. -k1,1n -k2,2n -k3,3n | uniq)
-
-          echo "All discovered PHP versions with fpm-bookworm:"
-          echo "$PHP_VERSIONS"
-
-          # Find latest version for current main minor line
-          CURRENT_MAIN_SHORT="${{ steps.current.outputs.main-short }}"
-          LATEST_MAIN=$(echo "$PHP_VERSIONS" | grep "^${CURRENT_MAIN_SHORT}\." | tail -1)
-
-          # Find latest version for current OCI minor line
-          CURRENT_OCI_SHORT="${{ steps.current.outputs.oci-short }}"
-          LATEST_OCI=$(echo "$PHP_VERSIONS" | grep "^${CURRENT_OCI_SHORT}\." | tail -1)
-
-          # Detect if a newer minor version exists (e.g., 8.6.x when on 8.5.x)
-          MAJOR=$(echo "$CURRENT_MAIN_SHORT" | cut -d. -f1)
-          ALL_MINORS=$(echo "$PHP_VERSIONS" | grep "^${MAJOR}\." | grep -oP '^\d+\.\d+' | sort -t. -k1,1n -k2,2n | uniq)
-          HIGHEST_MINOR=$(echo "$ALL_MINORS" | tail -1)
-
-          if [ "$HIGHEST_MINOR" != "$CURRENT_MAIN_SHORT" ]; then
-            # A newer minor version line exists
-            LATEST_NEW_MINOR=$(echo "$PHP_VERSIONS" | grep "^${HIGHEST_MINOR}\." | tail -1)
-            echo "New minor version line detected: ${HIGHEST_MINOR}.x (latest: $LATEST_NEW_MINOR)"
-            echo "new-minor=$LATEST_NEW_MINOR" >> "$GITHUB_OUTPUT"
-            echo "new-minor-short=$HIGHEST_MINOR" >> "$GITHUB_OUTPUT"
-          fi
-
-          echo "latest-main=$LATEST_MAIN" >> "$GITHUB_OUTPUT"
-          echo "latest-oci=$LATEST_OCI" >> "$GITHUB_OUTPUT"
-
-          echo "Latest for main track (${CURRENT_MAIN_SHORT}.x): $LATEST_MAIN"
-          echo "Latest for OCI track (${CURRENT_OCI_SHORT}.x): $LATEST_OCI"
-
-      - name: Fetch FrankenPHP versions from Docker Hub
-        id: franken
-        run: |
           ALL_TAGS=""
           PAGE=1
           while true; do
-            RESPONSE=$(curl -s "https://hub.docker.com/v2/repositories/dunglas/frankenphp/tags/?page_size=100&page=${PAGE}&name=bookworm")
+            RESPONSE=$(curl -s "https://hub.docker.com/v2/repositories/library/php/tags/?page_size=100&page=${PAGE}&name=${{ env.PHP_MINOR }}")
             TAGS=$(echo "$RESPONSE" | jq -r '.results[]?.name // empty')
             if [ -z "$TAGS" ]; then
               break
@@ -111,183 +52,119 @@ jobs:
             PAGE=$((PAGE + 1))
           done
 
-          # Extract PHP versions from 1-phpX.Y.Z-bookworm tags
-          FRANKEN_VERSIONS=$(echo "$ALL_TAGS" | grep -oP '(?<=^1-php)\d+\.\d+\.\d+(?=-bookworm$)' | sort -t. -k1,1n -k2,2n -k3,3n | uniq)
+          # Extract versions matching X.Y.Z-fpm-bookworm within our minor line
+          LATEST=$(echo "$ALL_TAGS" \
+            | grep -oP '^${{ env.PHP_MINOR }}\.\d+(?=-fpm-bookworm$)' \
+            | sort -t. -k1,1n -k2,2n -k3,3n \
+            | tail -1)
 
-          echo "FrankenPHP available PHP versions:"
-          echo "$FRANKEN_VERSIONS"
+          echo "Latest PHP ${{ env.PHP_MINOR }}.x: $LATEST"
+          echo "version=$LATEST" >> "$GITHUB_OUTPUT"
 
-          # Store as comma-separated for easy lookup
-          FRANKEN_LIST=$(echo "$FRANKEN_VERSIONS" | tr '\n' ',' | sed 's/,$//')
-          echo "versions=$FRANKEN_LIST" >> "$GITHUB_OUTPUT"
+      - name: Check FrankenPHP availability
+        id: franken
+        run: |
+          LATEST="${{ steps.fetch.outputs.version }}"
+          if [ -z "$LATEST" ]; then
+            echo "No PHP version found, skipping"
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
 
-      - name: Determine updates needed
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            "https://hub.docker.com/v2/repositories/dunglas/frankenphp/tags/1-php${LATEST}-bookworm")
+
+          if [ "$STATUS" = "200" ]; then
+            echo "FrankenPHP 1-php${LATEST}-bookworm exists"
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "FrankenPHP 1-php${LATEST}-bookworm NOT found (HTTP $STATUS)"
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Determine if update is needed
         id: update
         run: |
-          CURRENT_MAIN="${{ steps.current.outputs.main }}"
-          CURRENT_MAIN_SHORT="${{ steps.current.outputs.main-short }}"
-          CURRENT_OCI="${{ steps.current.outputs.oci }}"
-          LATEST_MAIN="${{ steps.fetch.outputs.latest-main }}"
-          LATEST_OCI="${{ steps.fetch.outputs.latest-oci }}"
-          NEW_MINOR="${{ steps.fetch.outputs.new-minor }}"
-          NEW_MINOR_SHORT="${{ steps.fetch.outputs.new-minor-short }}"
-          FRANKEN_VERSIONS="${{ steps.franken.outputs.versions }}"
+          CURRENT="${{ steps.current.outputs.version }}"
+          LATEST="${{ steps.fetch.outputs.version }}"
+          FRANKEN_OK="${{ steps.franken.outputs.available }}"
 
-          MAIN_UPDATED="false"
-          OCI_UPDATED="false"
-          NEW_MAIN_VERSION=""
-          NEW_MAIN_SHORT=""
-          NEW_OCI_VERSION=""
-
-          # Decide the target main version
-          # Prefer new minor version if available and FrankenPHP supports it
-          if [ -n "$NEW_MINOR" ]; then
-            if echo ",$FRANKEN_VERSIONS," | grep -q ",$NEW_MINOR,"; then
-              echo "New minor version $NEW_MINOR is available and FrankenPHP supports it"
-              NEW_MAIN_VERSION="$NEW_MINOR"
-              NEW_MAIN_SHORT="$NEW_MINOR_SHORT"
-            else
-              echo "New minor version $NEW_MINOR exists but FrankenPHP does not support it yet, staying on ${CURRENT_MAIN_SHORT}.x"
-              if [ "$LATEST_MAIN" != "$CURRENT_MAIN" ]; then
-                # Check FrankenPHP has the latest patch for current minor
-                if echo ",$FRANKEN_VERSIONS," | grep -q ",$LATEST_MAIN,"; then
-                  NEW_MAIN_VERSION="$LATEST_MAIN"
-                  NEW_MAIN_SHORT="$CURRENT_MAIN_SHORT"
-                else
-                  echo "FrankenPHP does not have $LATEST_MAIN yet, skipping main track update"
-                fi
-              fi
-            fi
-          elif [ "$LATEST_MAIN" != "$CURRENT_MAIN" ]; then
-            # Same minor, newer patch
-            if echo ",$FRANKEN_VERSIONS," | grep -q ",$LATEST_MAIN,"; then
-              NEW_MAIN_VERSION="$LATEST_MAIN"
-              NEW_MAIN_SHORT="$CURRENT_MAIN_SHORT"
-            else
-              echo "FrankenPHP does not have $LATEST_MAIN yet, skipping main track update"
-            fi
+          if [ -z "$LATEST" ]; then
+            echo "Could not determine latest version, skipping"
+            echo "updated=false" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
 
-          # Check OCI track
-          if [ "$LATEST_OCI" != "$CURRENT_OCI" ] && [ -n "$LATEST_OCI" ]; then
-            NEW_OCI_VERSION="$LATEST_OCI"
+          if [ "$LATEST" = "$CURRENT" ]; then
+            echo "Already on latest version ($CURRENT). No update needed."
+            echo "updated=false" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
 
-          # Validate that all required tags exist before proceeding
-          if [ -n "$NEW_MAIN_VERSION" ]; then
-            echo "Validating tags for main track version $NEW_MAIN_VERSION..."
-            VALID=true
-            for SUFFIX in apache-bookworm fpm-bookworm cli-bookworm; do
-              TAG="php:${NEW_MAIN_VERSION}-${SUFFIX}"
-              STATUS=$(curl -s -o /dev/null -w "%{http_code}" "https://hub.docker.com/v2/repositories/library/php/tags/${NEW_MAIN_VERSION}-${SUFFIX}")
-              if [ "$STATUS" != "200" ]; then
-                echo "Tag $TAG not found (HTTP $STATUS), skipping main update"
-                VALID=false
-                break
-              fi
-              echo "  $TAG exists"
-            done
+          if [ "$FRANKEN_OK" != "true" ]; then
+            echo "FrankenPHP does not have PHP $LATEST yet. Skipping update."
+            echo "updated=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
 
-            FRANKEN_TAG="dunglas/frankenphp:1-php${NEW_MAIN_VERSION}-bookworm"
-            FRANKEN_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "https://hub.docker.com/v2/repositories/dunglas/frankenphp/tags/1-php${NEW_MAIN_VERSION}-bookworm")
-            if [ "$FRANKEN_STATUS" != "200" ]; then
-              echo "Tag $FRANKEN_TAG not found (HTTP $FRANKEN_STATUS), skipping main update"
+          # Validate all required official PHP tags exist
+          echo "Validating all required tags for PHP $LATEST..."
+          VALID=true
+          for SUFFIX in apache-bookworm fpm-bookworm cli-bookworm; do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+              "https://hub.docker.com/v2/repositories/library/php/tags/${LATEST}-${SUFFIX}")
+            if [ "$STATUS" != "200" ]; then
+              echo "  php:${LATEST}-${SUFFIX} NOT found (HTTP $STATUS)"
               VALID=false
-            else
-              echo "  $FRANKEN_TAG exists"
+              break
             fi
+            echo "  php:${LATEST}-${SUFFIX} exists"
+          done
 
-            if [ "$VALID" = true ]; then
-              MAIN_UPDATED="true"
-              echo "Main track: $CURRENT_MAIN -> $NEW_MAIN_VERSION"
-            else
-              NEW_MAIN_VERSION=""
-              NEW_MAIN_SHORT=""
-            fi
+          if [ "$VALID" != "true" ]; then
+            echo "Not all tags available. Skipping update."
+            echo "updated=false" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
 
-          if [ -n "$NEW_OCI_VERSION" ]; then
-            echo "Validating tags for OCI track version $NEW_OCI_VERSION..."
-            OCI_TAG_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "https://hub.docker.com/v2/repositories/library/php/tags/${NEW_OCI_VERSION}-fpm-bookworm")
-            if [ "$OCI_TAG_STATUS" = "200" ]; then
-              OCI_UPDATED="true"
-              echo "OCI track: $CURRENT_OCI -> $NEW_OCI_VERSION"
-            else
-              echo "Tag php:${NEW_OCI_VERSION}-fpm-bookworm not found, skipping OCI update"
-              NEW_OCI_VERSION=""
-            fi
-          fi
+          echo "Update available: $CURRENT -> $LATEST"
+          echo "updated=true" >> "$GITHUB_OUTPUT"
+          echo "new-version=$LATEST" >> "$GITHUB_OUTPUT"
 
-          if [ "$MAIN_UPDATED" = "false" ] && [ "$OCI_UPDATED" = "false" ]; then
-            echo "No updates found. All versions are up to date."
-          fi
-
-          echo "main-updated=$MAIN_UPDATED" >> "$GITHUB_OUTPUT"
-          echo "oci-updated=$OCI_UPDATED" >> "$GITHUB_OUTPUT"
-          echo "new-main-version=$NEW_MAIN_VERSION" >> "$GITHUB_OUTPUT"
-          echo "new-main-short=$NEW_MAIN_SHORT" >> "$GITHUB_OUTPUT"
-          echo "new-oci-version=$NEW_OCI_VERSION" >> "$GITHUB_OUTPUT"
-
-      - name: Update files
-        if: steps.update.outputs.main-updated == 'true' || steps.update.outputs.oci-updated == 'true'
+      - name: Update Dockerfiles and workflow
+        if: steps.update.outputs.updated == 'true'
         run: |
-          NEW_MAIN="${{ steps.update.outputs.new-main-version }}"
-          NEW_MAIN_SHORT="${{ steps.update.outputs.new-main-short }}"
-          NEW_OCI="${{ steps.update.outputs.new-oci-version }}"
+          NEW_VERSION="${{ steps.update.outputs.new-version }}"
 
-          MAIN_DOCKERFILES="apache cli dev fpm supervisor franken supervisor-franken"
-          OCI_DOCKERFILES="oci supervisor-oci"
+          ALL_DOCKERFILES="apache cli dev fpm supervisor franken supervisor-franken oci supervisor-oci"
 
-          if [ -n "$NEW_MAIN" ]; then
-            echo "Updating main track Dockerfiles to PHP $NEW_MAIN..."
-            for DIR in $MAIN_DOCKERFILES; do
-              sed -i "s/^ARG PHP_VERSION=.*/ARG PHP_VERSION=${NEW_MAIN}/" "${DIR}/Dockerfile"
-              echo "  Updated ${DIR}/Dockerfile"
-            done
+          echo "Updating all Dockerfiles to PHP $NEW_VERSION..."
+          for DIR in $ALL_DOCKERFILES; do
+            sed -i "s/^ARG PHP_VERSION=.*/ARG PHP_VERSION=${NEW_VERSION}/" "${DIR}/Dockerfile"
+            echo "  Updated ${DIR}/Dockerfile"
+          done
 
-            echo "Updating docker-publish.yml..."
-            sed -i "s/^\( *\)PHP_SHORT_VERSION=.*/\1PHP_SHORT_VERSION=${NEW_MAIN_SHORT}/" .github/workflows/docker-publish.yml
-            sed -i "s/^\( *\)PHP_VERSION=[0-9].*/\1PHP_VERSION=${NEW_MAIN}/" .github/workflows/docker-publish.yml
-            echo "  Updated .github/workflows/docker-publish.yml"
-          fi
-
-          if [ -n "$NEW_OCI" ]; then
-            echo "Updating OCI track Dockerfiles to PHP $NEW_OCI..."
-            for DIR in $OCI_DOCKERFILES; do
-              sed -i "s/^ARG PHP_VERSION=.*/ARG PHP_VERSION=${NEW_OCI}/" "${DIR}/Dockerfile"
-              echo "  Updated ${DIR}/Dockerfile"
-            done
-          fi
+          echo "Updating docker-publish.yml..."
+          sed -i "s/^\( *\)PHP_SHORT_VERSION=.*/\1PHP_SHORT_VERSION=${{ env.PHP_MINOR }}/" .github/workflows/docker-publish.yml
+          sed -i "s/^\( *\)PHP_VERSION=[0-9].*/\1PHP_VERSION=${NEW_VERSION}/" .github/workflows/docker-publish.yml
+          echo "  Updated .github/workflows/docker-publish.yml"
 
       - name: Commit and push
-        if: steps.update.outputs.main-updated == 'true' || steps.update.outputs.oci-updated == 'true'
+        if: steps.update.outputs.updated == 'true'
         run: |
-          CURRENT_MAIN="${{ steps.current.outputs.main }}"
-          CURRENT_OCI="${{ steps.current.outputs.oci }}"
-          NEW_MAIN="${{ steps.update.outputs.new-main-version }}"
-          NEW_OCI="${{ steps.update.outputs.new-oci-version }}"
+          CURRENT="${{ steps.current.outputs.version }}"
+          NEW_VERSION="${{ steps.update.outputs.new-version }}"
 
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
           git add -A
-
-          # Build commit message
-          MSG="chore: auto-update PHP version"
-          DETAILS=""
-          if [ -n "$NEW_MAIN" ]; then
-            DETAILS="${DETAILS}\n- Main track: ${CURRENT_MAIN} -> ${NEW_MAIN}"
-          fi
-          if [ -n "$NEW_OCI" ]; then
-            DETAILS="${DETAILS}\n- OCI track: ${CURRENT_OCI} -> ${NEW_OCI}"
-          fi
-
-          git commit -m "${MSG}" -m "$(echo -e "$DETAILS")"
+          git commit -m "chore: auto-update PHP ${CURRENT} -> ${NEW_VERSION}"
           git push
 
-  build-and-push-main:
+  build-and-push:
     needs: check-and-update
-    if: needs.check-and-update.outputs.main-updated == 'true'
+    if: needs.check-and-update.outputs.updated == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -304,8 +181,8 @@ jobs:
       - name: Build and push the images
         run: |
           VERSION=${{ matrix.image-variant }}
-          PHP_VERSION="${{ needs.check-and-update.outputs.new-main-version }}"
-          PHP_SHORT_VERSION="${{ needs.check-and-update.outputs.new-main-short }}"
+          PHP_VERSION="${{ needs.check-and-update.outputs.new-version }}"
+          PHP_SHORT_VERSION=${{ env.PHP_MINOR }}
 
           tmpName="image-$RANDOM"
           docker build $VERSION --file $VERSION/Dockerfile --tag $tmpName --build-arg PHP_VERSION=$PHP_VERSION
@@ -326,41 +203,3 @@ jobs:
             docker tag $tmpName $IMAGE_ID:latest
             docker push $IMAGE_ID:latest
           fi
-
-  build-and-push-oci:
-    needs: check-and-update
-    if: needs.check-and-update.outputs.oci-updated == 'true'
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        image-variant: ['oci', 'supervisor-oci']
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: main
-
-      - name: Log into registry
-        run: echo "${{ secrets.DOCKER_PASSWORD }}" | docker login ${{ secrets.DOCKER_REGISTRY_URL }} -u ${{ secrets.DOCKER_USERNAME }} --password-stdin
-
-      - name: Build and push the images
-        run: |
-          VERSION=${{ matrix.image-variant }}
-          PHP_VERSION="${{ needs.check-and-update.outputs.new-oci-version }}"
-          PHP_SHORT_VERSION=$(echo "$PHP_VERSION" | grep -oP '^\d+\.\d+')
-
-          tmpName="image-$RANDOM"
-          docker build $VERSION --file $VERSION/Dockerfile --tag $tmpName --build-arg PHP_VERSION=$PHP_VERSION
-          if [ $? -ne 0 ]; then
-            echo "Docker build failed for ${VERSION}-$PHP_VERSION"
-            exit 1
-          fi
-
-          IMAGE_ID=${{ secrets.DOCKER_REGISTRY_URL }}/${{ secrets.DOCKER_USERNAME }}/${{ secrets.IMAGE_NAME }}
-
-          docker tag $tmpName $IMAGE_ID:$VERSION
-          docker push $IMAGE_ID:$VERSION
-          docker tag $tmpName $IMAGE_ID:${VERSION}-$PHP_VERSION
-          docker push $IMAGE_ID:${VERSION}-$PHP_VERSION
-          docker tag $tmpName $IMAGE_ID:${VERSION}-$PHP_SHORT_VERSION
-          docker push $IMAGE_ID:${VERSION}-$PHP_SHORT_VERSION
